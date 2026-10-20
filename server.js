@@ -1,8 +1,5 @@
-// Fichier : server.js
-// C'est le fichier principal de l'API. On le lance avec : npm start
 
 // On charge le fichier .env.
-// Après cette ligne, on peut lire les variables avec process.env.
 require("dotenv").config();
 
 // On importe Express.
@@ -22,10 +19,6 @@ const PORT = process.env.PORT || 3000;
 // Sans lui, req.body est vide (undefined).
 // Il doit être placé avant les routes.
 app.use(express.json());
-
-// Cette fonction vérifie qu'un id est un nombre entier positif.
-// Par exemple : "12" est valide, "abc" ne l'est pas.
-// Les valeurs de l'URL sont toujours du texte, d'où cette vérification.
 function estUnIdValide(valeur) {
   return /^\d+$/.test(valeur) && Number(valeur) > 0;
 }
@@ -41,15 +34,9 @@ app.get("/api/pnj", async (req, res) => {
   try {
     // "await" attend la réponse de la base avant de continuer.
     const resultat = await pool.query("SELECT * FROM Personnage ORDER BY id");
-
-    // Les lignes de la table se trouvent dans resultat.rows.
-    // Code 200 = tout s'est bien passé.
     res.status(200).json(resultat.rows);
   } catch (erreur) {
-    // On affiche l'erreur dans le terminal, pour nous.
     console.error("Erreur GET /api/pnj :", erreur.message);
-    // On envoie un message simple au client.
-    // Code 500 = erreur du serveur.
     res
       .status(500)
       .json({ erreur: "Une erreur interne est survenue dans la Taverne" });
@@ -73,17 +60,11 @@ app.get("/api/pnj/:id", async (req, res) => {
         .json({ erreur: "L'identifiant doit être un nombre entier positif" });
     }
 
-    // On ne met jamais la valeur directement dans le SQL.
-    // On écrit $1 à la place, et on donne la valeur à côté.
-    // Cela protège contre les injections SQL.
     const resultat = await pool.query(
       "SELECT * FROM Personnage WHERE id = $1",
       [idSaisi],
     );
 
-    // Si on ne trouve aucune ligne, le PNJ n'existe pas.
-    // Code 404 = introuvable.
-    // Le "return" arrête la fonction ici.
     if (resultat.rows.length === 0) {
       return res
         .status(404)
@@ -102,19 +83,11 @@ app.get("/api/pnj/:id", async (req, res) => {
 
 // ---------------------------------------------------------------
 // POST /api/pnj : créer un nouveau PNJ
-// POST sert à ajouter des données.
-// Les données arrivent dans le corps de la requête (req.body).
 // ---------------------------------------------------------------
 app.post("/api/pnj", async (req, res) => {
   try {
     // On récupère nom, classe et niveau envoyés par le client.
     const { nom, classe, niveau } = req.body;
-
-    // On vérifie les données AVANT d'aller dans la base.
-    // Si une donnée manque, on répond tout de suite avec le code 400.
-
-    // Le nom doit être un texte, et pas vide.
-    // trim() enlève les espaces au début et à la fin.
     if (typeof nom !== "string" || nom.trim() === "") {
       return res.status(400).json({ erreur: "Le champ 'nom' est obligatoire" });
     }
@@ -132,8 +105,6 @@ app.post("/api/pnj", async (req, res) => {
     }
 
     // On ajoute le PNJ dans la base.
-    // $1, $2, $3 sont remplacés par les valeurs du tableau, dans l'ordre.
-    // "RETURNING *" renvoie le PNJ créé, avec son nouvel id.
     const resultat = await pool.query(
       "INSERT INTO Personnage (nom, classe, niveau) VALUES ($1, $2, $3) RETURNING *",
       [nom.trim(), classe.trim(), niveau],
@@ -155,9 +126,6 @@ app.post("/api/pnj", async (req, res) => {
 
 // ---------------------------------------------------------------
 // PATCH /api/pnj/:id : changer le niveau d'un PNJ
-// PATCH sert à modifier une partie d'une donnée.
-// L'id est dans l'URL. Le nouveau niveau est dans le corps.
-// Exemple de corps : { "niveau": 12 }
 // ---------------------------------------------------------------
 app.patch("/api/pnj/:id", async (req, res) => {
   try {
@@ -203,8 +171,6 @@ app.patch("/api/pnj/:id", async (req, res) => {
 
 // ---------------------------------------------------------------
 // DELETE /api/pnj/:id : supprimer un PNJ
-// DELETE sert à supprimer une donnée.
-// L'id du PNJ à supprimer est dans l'URL. Exemple : /api/pnj/3
 // ---------------------------------------------------------------
 app.delete("/api/pnj/:id", async (req, res) => {
   try {
@@ -243,15 +209,11 @@ app.delete("/api/pnj/:id", async (req, res) => {
 // But : toujours répondre en JSON, même en cas d'erreur.
 // ---------------------------------------------------------------
 
-// Si l'adresse demandée n'existe pas (exemple : /api/dragons).
-// Ce bloc doit rester après toutes les routes.
 app.use((req, res) => {
   res.status(404).json({ erreur: "Cette route n'existe pas dans la Taverne" });
 });
 
 // Ce bloc attrape les autres erreurs.
-// Exemple : le client envoie un JSON mal écrit.
-// Express le reconnaît grâce à ses 4 paramètres (err, req, res, next).
 app.use((err, req, res, next) => {
   if (err.type === "entity.parse.failed") {
     return res.status(400).json({ erreur: "Le corps de la requête n'est pas un JSON valide" });
