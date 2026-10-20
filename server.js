@@ -1,103 +1,97 @@
-// =====================================================================
-//  Fichier : server.js — Point d'entrée de l'API REST "La Taverne"
-// =====================================================================
+// Fichier : server.js
+// C'est le fichier principal de l'API. On le lance avec : npm start
 
-// Charge le fichier .env dans process.env. Toujours en LIGNE 1 :
-// tout le code qui suit peut alors lire process.env.DATABASE_URL, process.env.PORT...
+// On charge le fichier .env.
+// Après cette ligne, on peut lire les variables avec process.env.
 require("dotenv").config();
 
-// 1. On importe la bibliothèque Express
+// On importe Express.
 const express = require("express");
 
-// ⚠️ CORRIGÉ : il manquait cet import ! La route GET utilisait `pool.query(...)`
-// alors que `pool` n'existait pas dans ce fichier -> "ReferenceError: pool is not defined".
-// require("./db") exécute db.js et récupère ce qu'il exporte (module.exports = pool).
+// On importe la connexion à la base de données (fichier db.js).
 const pool = require("./db");
 
-// 2. On instancie l'application
+// On crée l'application.
 const app = express();
 
-// ⚠️ AMÉLIORÉ : le port vient du .env (bonne pratique, cf. Mini-exercice 3).
-// `||` = valeur de secours : si PORT n'est pas défini dans .env, on prend 3000.
+// On prend le port écrit dans le .env.
+// S'il n'y en a pas, on utilise 3000.
 const PORT = process.env.PORT || 3000;
 
-// MIDDLEWARE express.json()
-// QUAND ? Toujours, dès que l'API reçoit du JSON (POST, PUT, PATCH).
-// Sans lui, req.body vaut undefined. Il doit être placé AVANT les routes,
-// car Express exécute les app.use / app.get... dans l'ordre du fichier.
+// Ce middleware permet de lire le JSON envoyé par le client.
+// Sans lui, req.body est vide (undefined).
+// Il doit être placé avant les routes.
 app.use(express.json());
 
-// ---------------------------------------------------------------------
-// Fonction utilitaire : vérifier qu'un id d'URL est un entier positif.
-// POURQUOI ? req.params.id est TOUJOURS une chaîne ("45", "abc"...).
-// Si on envoie "abc" à PostgreSQL pour une colonne INTEGER, il lève une
-// erreur -> on renverrait un 500 alors que c'est la faute du client (400).
-// ---------------------------------------------------------------------
+// Cette fonction vérifie qu'un id est un nombre entier positif.
+// Par exemple : "12" est valide, "abc" ne l'est pas.
+// Les valeurs de l'URL sont toujours du texte, d'où cette vérification.
 function estUnIdValide(valeur) {
   return /^\d+$/.test(valeur) && Number(valeur) > 0;
 }
 
-// =====================================================================
-//  FONCTIONNALITÉ 1 : Le Registre de la Taverne
-//  GET /api/pnj -> liste complète des PNJ
-//  GET = LIRE (équivalent SQL : SELECT). Ne modifie jamais la base.
-// =====================================================================
-// `async` : la fonction contient des opérations longues (appel réseau vers Neon).
+// ---------------------------------------------------------------
+// GET /api/pnj : afficher tous les PNJ
+// GET sert à lire des données. Il ne modifie rien.
+// ---------------------------------------------------------------
+// "async" veut dire que la fonction va attendre la base de données.
 app.get("/api/pnj", async (req, res) => {
-  // try / catch : si Neon est en panne ou si le SQL est faux, l'erreur est
-  // "attrapée" dans le catch au lieu de faire planter tout le serveur.
+  // "try" : on essaie d'exécuter le code.
+  // En cas de problème, on passe dans "catch" et le serveur ne plante pas.
   try {
-    // `await` : on ATTEND la réponse de PostgreSQL avant de passer à la ligne suivante.
-    // Pas de donnée utilisateur dans cette requête -> pas besoin de $1.
-    // ORDER BY id : un ordre stable, plus agréable pour le Front-end.
+    // "await" attend la réponse de la base avant de continuer.
     const resultat = await pool.query("SELECT * FROM Personnage ORDER BY id");
 
-    // ⚠️ CORRIGÉ : avant, tu renvoyais le tableau "inventaire" écrit en dur
-    // et le résultat SQL était ignoré. Les vraies lignes sont dans resultat.rows.
+    // Les lignes de la table se trouvent dans resultat.rows.
+    // Code 200 = tout s'est bien passé.
     res.status(200).json(resultat.rows);
   } catch (erreur) {
-    // 1. Pour nous (développeurs) : le détail technique dans le terminal.
+    // On affiche l'erreur dans le terminal, pour nous.
     console.error("Erreur GET /api/pnj :", erreur.message);
-    // 2. Pour le client : un message neutre, sans détails piratables.
+    // On envoie un message simple au client.
+    // Code 500 = erreur du serveur.
     res
       .status(500)
       .json({ erreur: "Une erreur interne est survenue dans la Taverne" });
   }
 });
 
-// =====================================================================
-//  GET /api/pnj/:id -> la fiche d'UN PNJ (vu dans le cours, partie 4.C)
-//  `:id` = paramètre dynamique, lu avec req.params.id.
-//  QUAND utiliser req.params ? Pour IDENTIFIER une ressource précise (GET, DELETE, PATCH).
-// =====================================================================
+// ---------------------------------------------------------------
+// GET /api/pnj/:id : afficher un seul PNJ
+// ":id" est une variable dans l'URL. Exemple : /api/pnj/2
+// ---------------------------------------------------------------
 app.get("/api/pnj/:id", async (req, res) => {
   try {
+    // On récupère l'id écrit dans l'URL.
     const idSaisi = req.params.id;
 
+    // Si l'id n'est pas valide, on arrête ici.
+    // Code 400 = le client a envoyé une mauvaise demande.
     if (!estUnIdValide(idSaisi)) {
       return res
         .status(400)
         .json({ erreur: "L'identifiant doit être un nombre entier positif" });
     }
 
-    // REQUÊTE PARAMÉTRÉE : $1 est un "marque-place", la valeur est passée à part
-    // dans le tableau [idSaisi]. Le pilote pg empêche ainsi toute injection SQL.
-    // QUAND ? DÈS QU'UNE donnée vient du client (params, body, query). Toujours.
+    // On ne met jamais la valeur directement dans le SQL.
+    // On écrit $1 à la place, et on donne la valeur à côté.
+    // Cela protège contre les injections SQL.
     const resultat = await pool.query(
       "SELECT * FROM Personnage WHERE id = $1",
       [idSaisi],
     );
 
-    // Aucune ligne trouvée -> 404 Not Found.
-    // Le `return` arrête la fonction : sinon Express essaierait d'envoyer
-    // une 2e réponse plus bas (erreur "Cannot set headers after they are sent").
+    // Si on ne trouve aucune ligne, le PNJ n'existe pas.
+    // Code 404 = introuvable.
+    // Le "return" arrête la fonction ici.
     if (resultat.rows.length === 0) {
       return res
         .status(404)
         .json({ erreur: "PNJ introuvable dans la Taverne" });
     }
 
-    res.status(200).json(resultat.rows[0]); // un seul PNJ -> un objet, pas un tableau
+    // On renvoie le PNJ trouvé (la première ligne).
+    res.status(200).json(resultat.rows[0]);
   } catch (erreur) {
     console.error("Erreur GET /api/pnj/:id :", erreur.message);
     res
@@ -106,49 +100,47 @@ app.get("/api/pnj/:id", async (req, res) => {
   }
 });
 
-// =====================================================================
-//  FONCTIONNALITÉ 2 : L'Enrôlement d'une recrue
-//  POST /api/pnj -> crée un PNJ à partir du corps de la requête (req.body)
-//  POST = CRÉER (équivalent SQL : INSERT). Succès -> 201 Created.
-//  QUAND utiliser req.body ? Pour ENVOYER des données (création, modification).
-// =====================================================================
+// ---------------------------------------------------------------
+// POST /api/pnj : créer un nouveau PNJ
+// POST sert à ajouter des données.
+// Les données arrivent dans le corps de la requête (req.body).
+// ---------------------------------------------------------------
 app.post("/api/pnj", async (req, res) => {
   try {
-    // Déstructuration : équivaut à
-    //   const nom = req.body.nom; const classe = req.body.classe; const niveau = req.body.niveau;
-    // ⚠️ CORRIGÉ : `niveau` n'était pas extrait, alors que le TP le demande.
+    // On récupère nom, classe et niveau envoyés par le client.
     const { nom, classe, niveau } = req.body;
 
-    // ---------- BONUS D'ARCHITECTURE : validation AVANT d'appeler Neon ----------
-    // POURQUOI ? Inutile de faire un aller-retour réseau vers la base pour une
-    // requête qu'on sait déjà invalide. On répond 400 Bad Request (faute du client).
-    // typeof ... !== "string" : refuse aussi les nombres, null, undefined...
-    // .trim() : enlève les espaces, pour refuser un nom composé uniquement d'espaces "   ".
+    // On vérifie les données AVANT d'aller dans la base.
+    // Si une donnée manque, on répond tout de suite avec le code 400.
+
+    // Le nom doit être un texte, et pas vide.
+    // trim() enlève les espaces au début et à la fin.
     if (typeof nom !== "string" || nom.trim() === "") {
       return res.status(400).json({ erreur: "Le champ 'nom' est obligatoire" });
     }
+    // La classe doit être un texte, et pas vide.
     if (typeof classe !== "string" || classe.trim() === "") {
       return res
         .status(400)
         .json({ erreur: "Le champ 'classe' est obligatoire" });
     }
-    // Number.isInteger : vrai pour 10, faux pour "10", 2.5, undefined...
+    // Le niveau doit être un nombre entier, au minimum 1.
     if (!Number.isInteger(niveau) || niveau < 1) {
       return res.status(400).json({
         erreur: "Le champ 'niveau' est obligatoire et doit être un entier ≥ 1",
       });
     }
-    // ---------------------------------------------------------------------------
 
-    // 3 valeurs -> 3 marque-places ($1, $2, $3), dans le MÊME ordre que le tableau.
-    // RETURNING * : PostgreSQL renvoie la ligne créée (avec son id généré),
-    // on évite ainsi un second SELECT pour connaître l'id du nouveau PNJ.
+    // On ajoute le PNJ dans la base.
+    // $1, $2, $3 sont remplacés par les valeurs du tableau, dans l'ordre.
+    // "RETURNING *" renvoie le PNJ créé, avec son nouvel id.
     const resultat = await pool.query(
       "INSERT INTO Personnage (nom, classe, niveau) VALUES ($1, $2, $3) RETURNING *",
       [nom.trim(), classe.trim(), niveau],
     );
     const nouveauPnj = resultat.rows[0];
 
+    // Code 201 = la création a réussi.
     res.status(201).json({
       message: `${nouveauPnj.nom} le ${nouveauPnj.classe} a rejoint la taverne !`,
       pnj: nouveauPnj,
@@ -161,17 +153,18 @@ app.post("/api/pnj", async (req, res) => {
   }
 });
 
-// =====================================================================
-//  MINI-EXERCICE 4 (version REST) : modifier le niveau d'un PNJ
-//  PATCH /api/pnj/:id   body : { "niveau": 12 }
-//  PATCH = modifier UN champ précis (PUT remplacerait l'objet entier).
-//  L'id est dans l'URL (il identifie la ressource), la nouvelle valeur dans le body.
-// =====================================================================
+// ---------------------------------------------------------------
+// PATCH /api/pnj/:id : changer le niveau d'un PNJ
+// PATCH sert à modifier une partie d'une donnée.
+// L'id est dans l'URL. Le nouveau niveau est dans le corps.
+// Exemple de corps : { "niveau": 12 }
+// ---------------------------------------------------------------
 app.patch("/api/pnj/:id", async (req, res) => {
   try {
     const id = req.params.id;
     const nouveauNiveau = req.body.niveau;
 
+    // On vérifie l'id et le niveau.
     if (!estUnIdValide(id)) {
       return res
         .status(400)
@@ -183,12 +176,14 @@ app.patch("/api/pnj/:id", async (req, res) => {
         .json({ erreur: "Le champ 'niveau' doit être un entier ≥ 1" });
     }
 
+    // On modifie le niveau dans la base.
     const resultat = await pool.query(
       "UPDATE Personnage SET niveau = $1 WHERE id = $2 RETURNING *",
       [nouveauNiveau, id],
     );
 
-    // rowCount = nombre de lignes modifiées. 0 -> aucun PNJ avec cet id.
+    // rowCount donne le nombre de lignes modifiées.
+    // Si c'est 0, aucun PNJ n'a cet id.
     if (resultat.rowCount === 0) {
       return res
         .status(404)
@@ -206,14 +201,11 @@ app.patch("/api/pnj/:id", async (req, res) => {
   }
 });
 
-// =====================================================================
-//  MINI-EXERCICE 2 : supprimer un PNJ
-//  DELETE /api/pnj/:id -> succès : 200 OK
-// ⚠️ CORRIGÉ : ta route était `app.delete("/api/pnj")` avec l'id lu dans req.body.
-//   L'exercice demande l'id DANS L'URL (/api/pnj/:id) et une constante `idCible`.
-//   Convention REST : l'URL désigne la ressource ciblée, le verbe dit quoi en faire.
-//   (Certains outils n'envoient d'ailleurs pas de body avec DELETE.)
-// =====================================================================
+// ---------------------------------------------------------------
+// DELETE /api/pnj/:id : supprimer un PNJ
+// DELETE sert à supprimer une donnée.
+// L'id du PNJ à supprimer est dans l'URL. Exemple : /api/pnj/3
+// ---------------------------------------------------------------
 app.delete("/api/pnj/:id", async (req, res) => {
   try {
     const idCible = req.params.id;
@@ -224,11 +216,13 @@ app.delete("/api/pnj/:id", async (req, res) => {
         .json({ erreur: "L'identifiant doit être un nombre entier positif" });
     }
 
+    // On supprime le PNJ dans la base.
     const resultat = await pool.query(
       "DELETE FROM Personnage WHERE id = $1",
       [idCible],
     );
 
+    // Si rien n'a été supprimé, le PNJ n'existait pas.
     if (resultat.rowCount === 0) {
       return res
         .status(404)
@@ -244,21 +238,20 @@ app.delete("/api/pnj/:id", async (req, res) => {
   }
 });
 
-// =====================================================================
-//  Garder TOUTES les réponses en JSON (contrainte "Format d'échange")
-// =====================================================================
+// ---------------------------------------------------------------
+// Gestion des erreurs générales
+// But : toujours répondre en JSON, même en cas d'erreur.
+// ---------------------------------------------------------------
 
-// Route inconnue (ex : GET /api/dragons). Placée APRÈS toutes les routes :
-// Express n'arrive ici que si aucune route au-dessus n'a répondu.
-// Sans ça, Express renverrait une page HTML "Cannot GET ...".
+// Si l'adresse demandée n'existe pas (exemple : /api/dragons).
+// Ce bloc doit rester après toutes les routes.
 app.use((req, res) => {
   res.status(404).json({ erreur: "Cette route n'existe pas dans la Taverne" });
 });
 
-// Middleware d'erreur : on le reconnaît à ses 4 paramètres (err, req, res, next).
-// QUAND est-il utilisé ? Par exemple si le client envoie un JSON mal formé
-// ({ "nom": "Gimli", } avec une virgule en trop) : express.json() échoue
-// avant même d'atteindre nos routes, donc nos try/catch ne voient rien.
+// Ce bloc attrape les autres erreurs.
+// Exemple : le client envoie un JSON mal écrit.
+// Express le reconnaît grâce à ses 4 paramètres (err, req, res, next).
 app.use((err, req, res, next) => {
   if (err.type === "entity.parse.failed") {
     return res.status(400).json({ erreur: "Le corps de la requête n'est pas un JSON valide" });
@@ -269,7 +262,7 @@ app.use((err, req, res, next) => {
     .json({ erreur: "Une erreur interne est survenue dans la Taverne" });
 });
 
-// 3. On demande au serveur d'écouter sur le port défini (toujours en dernier)
+// On démarre le serveur sur le port choisi.
 app.listen(PORT, () => {
   console.log(
     `Le serveur de la Taverne est ouvert sur http://localhost:${PORT}`,

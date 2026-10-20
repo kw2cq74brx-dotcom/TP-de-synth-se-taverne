@@ -1,46 +1,36 @@
 // Fichier : db.js
-// RÔLE : créer UNE SEULE FOIS le pool de connexions vers PostgreSQL (Neon)
-// et le partager avec tous les autres fichiers (server.js, init-db.js...).
-// On isole ça dans un fichier dédié pour garder server.js lisible :
-// server.js s'occupe des routes, db.js s'occupe de la base.
+// Ce fichier crée la connexion à la base de données Neon.
+// Les autres fichiers l'utilisent avec : require("./db")
 
-// Charge le fichier .env dans process.env (DATABASE_URL, PORT...).
-// À appeler AVANT de lire process.env, sinon les variables valent undefined.
+// On charge le fichier .env pour lire DATABASE_URL.
 require("dotenv").config();
 
-// On récupère uniquement la classe Pool du package "pg" (déstructuration { }).
+// On importe l'outil Pool du package "pg".
 const { Pool } = require("pg");
 
-// ⚠️ CORRIGÉ : il y avait ici `const pool = require("./db");`
-// -> un fichier qui s'importe lui-même ! En plus, `pool` était déclaré deux fois,
-//    ce qui provoque une SyntaxError et empêche le serveur de démarrer.
-//    L'import `require("./db")` se fait dans server.js, pas ici.
-
-// Création du bassin de connexions.
-// ⚠️ CORRIGÉ : `newPool(...)` -> `new Pool(...)` (le mot-clé `new` + un espace).
-// `new` sert à construire un objet à partir d'une classe.
-// POURQUOI UN POOL ET PAS UN CLIENT ? Le pool garde plusieurs connexions ouvertes
-// et les réutilise : beaucoup plus rapide quand plusieurs requêtes arrivent en même temps.
+// On crée le pool de connexions.
+// Un pool garde plusieurs connexions ouvertes et les réutilise.
+// C'est plus rapide que d'ouvrir une connexion à chaque requête.
 const pool = new Pool({
-  // L'URL secrète est lue depuis .env : elle n'apparaît JAMAIS dans le code.
+  // L'adresse de la base vient du .env.
+  // Le mot de passe n'est donc jamais écrit dans le code.
   connectionString: process.env.DATABASE_URL,
-  // Neon impose une connexion chiffrée (SSL).
+  // Neon demande une connexion sécurisée (SSL).
   ssl: {
     rejectUnauthorized: false,
   },
 });
 
-// Test de connexion au démarrage (optionnel mais pratique pour déboguer).
-// pool.connect() emprunte une connexion ; release() la rend au pool.
-// Si on oublie release(), la connexion reste "bloquée" et le pool finit par saturer.
+// On teste la connexion au démarrage.
 pool.connect((err, client, release) => {
   if (err) {
     console.error("Erreur de connexion à la base Neon :", err.message);
   } else {
     console.log("✅ Connecté avec succès à la base de données PostgreSQL !");
+    // On rend la connexion au pool pour qu'elle serve à nouveau.
     release();
   }
 });
 
-// On exporte le pool : tout fichier qui fait `require("./db")` reçoit CE pool.
+// On partage le pool avec les autres fichiers.
 module.exports = pool;
